@@ -1,0 +1,5 @@
+streamlit==1.66.1
+langgraph==1.2.19
+langchain-google-genai==4.4.2
+tavily-python==0.8.5
+python-dotenv==1.2.4

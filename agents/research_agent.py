@@ -124,14 +124,40 @@ class ResearchAgent:
 
     def get_best_article_content(self, result):
         """
-        Prefer Tavily raw_content when it contains
-        substantially more article information.
+        Select the best article content by comparing
+        both Tavily content fields after cleaning.
         """
 
-        content = str(result.get("content", "") or "")
-        raw_content = str(result.get("raw_content", "") or "")
+        content = str(
+            result.get("content", "") or ""
+        )
 
-        if len(raw_content.strip()) > len(content.strip()) * 1.3:
+        raw_content = str(
+            result.get("raw_content", "") or ""
+        )
+
+        # Clean both candidates before comparing.
+        cleaned_content = self.clean_article_content(
+            content
+        )
+
+        cleaned_raw_content = self.clean_article_content(
+            raw_content
+        )
+
+        # Prefer whichever candidate contains usable text.
+        if not cleaned_content:
+            return raw_content
+
+        if not cleaned_raw_content:
+            return content
+
+        # Prefer raw content only when it provides
+        # meaningfully more cleaned article information.
+        if (
+            len(cleaned_raw_content)
+            > len(cleaned_content) * 1.10
+        ):
             return raw_content
 
         return content
@@ -1355,7 +1381,8 @@ class ResearchAgent:
             "springer.com",
             "researchgate.net",
             "pubmed.ncbi.nlm.nih.gov",
-            "openreview.net"
+            "openreview.net",
+            "preprints.org"
         ]
 
         official_technology_domains = [
@@ -1373,7 +1400,9 @@ class ResearchAgent:
             "developer.nvidia.com",
             "huggingface.co",
             "ibm.com",
-            "apple.com"
+            "apple.com",
+            "cloud.google.com",
+            "docs.cloud.google.com"
         ]
 
         government_domains = [
@@ -1396,26 +1425,45 @@ class ResearchAgent:
             "cnbc.com"
         ]
 
+                # Academic sources
         if any(
             domain == item or domain.endswith("." + item)
             for item in academic_domains
         ):
-            if "preprint" in title or "arxiv" in domain:
+            if (
+                "preprint" in title
+                or "arxiv" in domain
+                or "preprints.org" in domain
+            ):
                 return "research_preprint"
 
             return "research_paper"
 
+        # Google Cloud release notes
+        if (
+            domain == "docs.cloud.google.com"
+            and "release-notes" in url.lower()
+        ):
+            return "official_announcement"
+
+        # Official technology sources
         if any(
             domain == item or domain.endswith("." + item)
             for item in official_technology_domains
         ):
             return "official_technical_blog"
 
+        # Government sources
         if any(
             domain.endswith(item)
             for item in government_domains
         ):
             return "government_report"
+            if (
+                domain == "docs.cloud.google.com"
+                and "release-notes" in url.lower()
+            ):
+                return "official_announcement"
 
         if any(
             domain == item or domain.endswith("." + item)
@@ -1434,6 +1482,38 @@ class ResearchAgent:
             ]
         ):
             return "official_announcement"
+
+        if (
+            domain == "docs.oracle.com"
+            and "releasenotes" in url.lower()
+        ):
+            return "official_announcement"
+
+        if (
+             domain == "docs.cloud.google.com"
+             and "release-notes" in url.lower()
+        ):
+                return "official_announcement"
+
+        # Additional research and technology publications
+
+        if self.domain_matches(
+            domain,
+            "advancedsciencenews.com"
+        ):
+            return "expert_commentary"
+
+        if self.domain_matches(
+            domain,
+            "futureagi.com"
+        ):
+            return "technical_blog"
+
+        if self.domain_matches(
+            domain,
+            "reutersinstitute.politics.ox.ac.uk"
+        ):
+            return "expert_commentary"
 
         return "other"
 
@@ -1648,6 +1728,9 @@ class ResearchAgent:
             len(results) + self.batch_size - 1
         ) // self.batch_size
 
+        max_attempts = 4
+        retry_delay = 5
+
         for batch_number in range(total_batches):
 
             start = batch_number * self.batch_size
@@ -1661,66 +1744,100 @@ class ResearchAgent:
                 f"({len(batch)} sources)..."
             )
 
-            try:
+            scores = None
 
-                prompt = self.build_relevance_prompt(batch)
+            for attempt in range(1, max_attempts + 1):
 
-                response = self.llm.invoke(prompt)
+                try:
 
-                response_content = getattr(
-                    response,
-                    "content",
-                    response
-                )
+                    prompt = self.build_relevance_prompt(batch)
 
-                if isinstance(response_content, list):
+                    response = self.llm.invoke(prompt)
 
-                    text_parts = []
-
-                    for item in response_content:
-
-                        if isinstance(item, dict):
-                            text_parts.append(
-                                str(item.get("text", ""))
-                            )
-
-                        else:
-                            text_parts.append(str(item))
-
-                    response_text = "\n".join(text_parts)
-
-                else:
-                    response_text = str(response_content)
-
-                scores = self.parse_gemini_scores(
-                    response_text,
-                    len(batch)
-                )
-
-                for index, result in enumerate(batch):
-
-                    result["gemini_relevance_score"] = (
-                        scores[index]
-                        if index < len(scores)
-                        else 0.0
+                    response_content = getattr(
+                        response,
+                        "content",
+                        response
                     )
 
-                    evaluated_results.append(result)
+                    if isinstance(response_content, list):
 
-                time.sleep(1)
+                        text_parts = []
 
-            except Exception as error:
+                        for item in response_content:
+
+                            if isinstance(item, dict):
+                                text_parts.append(
+                                    str(item.get("text", ""))
+                                )
+
+                            else:
+                                text_parts.append(str(item))
+
+                        response_text = "\n".join(text_parts)
+
+                    else:
+                        response_text = str(response_content)
+
+                    parsed_scores = self.parse_gemini_scores(
+                        response_text,
+                        len(batch)
+                    )
+
+                    valid_count = sum(
+                        1 for score in parsed_scores
+                        if score > 0
+                    )
+
+                    if valid_count == 0:
+
+                        raise ValueError(
+                            "Gemini returned no valid relevance scores."
+                        )
+
+                    scores = parsed_scores
+
+                    print(
+                        f"Batch {batch_number + 1} successful: "
+                        f"{valid_count}/{len(batch)} scores parsed."
+                    )
+
+                    break
+
+                except Exception as error:
+
+                    print(
+                        f"Batch {batch_number + 1}, "
+                        f"attempt {attempt}/{max_attempts} failed: "
+                        f"{error}"
+                    )
+
+                    if attempt < max_attempts:
+
+                        delay = retry_delay * attempt
+
+                        print(
+                            f"Retrying in {delay} seconds..."
+                        )
+
+                        time.sleep(delay)
+
+            if scores is None:
 
                 print(
-                    f"Gemini evaluation failed for batch "
-                    f"{batch_number + 1}: {error}"
+                    f"Batch {batch_number + 1} failed "
+                    f"after {max_attempts} attempts."
                 )
 
-                for result in batch:
+                scores = [0.0] * len(batch)
 
-                    result["gemini_relevance_score"] = 0.0
+            for index, result in enumerate(batch):
 
-                    evaluated_results.append(result)
+                result["gemini_relevance_score"] = scores[index]
+
+                evaluated_results.append(result)
+
+            time.sleep(1)
 
         parsed_count = sum(
             1
@@ -1734,7 +1851,6 @@ class ResearchAgent:
         )
 
         return evaluated_results
-
     # ==================================================
     # GEMINI PROMPT
     # ==================================================
@@ -2148,8 +2264,20 @@ SOURCES TO EVALUATE:
             enriched.get("url", "") or ""
         )
 
-        content = self.get_best_article_content(
-            enriched
+                # Preserve content already cleaned during STEP 4.
+        content = str(
+            enriched.get("content", "") or ""
+        ).strip()
+
+        # Use the best available content only as a fallback.
+        if not content:
+            content = self.get_best_article_content(
+                enriched
+            )
+
+        # Ensure the final content is cleaned.
+        content = self.clean_article_content(
+            content
         )
 
         enriched["title"] = title.strip()

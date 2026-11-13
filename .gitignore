@@ -16,3 +16,11 @@ research_output.txt
 
 # Cache
 .pytest_cache/
+
+# Streamlit secrets and cache
+.streamlit/secrets.toml
+.streamlit/cache/
+
+# OS files
+.DS_Store
+Thumbs.db

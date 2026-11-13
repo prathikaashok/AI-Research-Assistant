@@ -1,127 +1,235 @@
+from pathlib import Path
+
 import streamlit as st
 from workflow.graph import ResearchWorkflow
 
 
-# -----------------------------------
-# 1. PAGE CONFIGURATION
-# -----------------------------------
+# ==========================================
+# PAGE CONFIGURATION
+# ==========================================
 
 st.set_page_config(
-    page_title="AI Research Assistant",
+    page_title="Multi-Agent AI Research Assistant",
     page_icon="🔬",
     layout="wide"
 )
 
 
-# -----------------------------------
-# 2. APPLICATION HEADER
-# -----------------------------------
+# ==========================================
+# CONSTANTS
+# ==========================================
+
+BASE_DIR = Path(__file__).resolve().parent
+
+REPORT_PATHS = [
+    BASE_DIR / "reports" / "Latest_developments_in_Generative_AI_report.md",
+    BASE_DIR / "reports" / "latest_development_in_generative_AI_report.md"
+]
+
+
+def load_sample_report():
+    """Load an existing generated report for offline demonstration."""
+
+    for report_path in REPORT_PATHS:
+        if report_path.exists():
+            return report_path.read_text(encoding="utf-8")
+
+    return None
+
+
+# ==========================================
+# APPLICATION HEADER
+# ==========================================
 
 st.title("🔬 Multi-Agent AI Research Assistant")
 
 st.markdown(
     """
-    Research smarter with AI.
-
-    This application uses multiple AI agents to research,
-    analyse, fact-check and generate detailed research reports.
+    An AI-powered research application that uses multiple
+    specialized agents to collect information, analyse findings,
+    fact-check results and generate structured research reports.
     """
 )
 
 st.divider()
 
 
-# -----------------------------------
-# 3. RESEARCH INPUT
-# -----------------------------------
+# ==========================================
+# MODE SELECTION
+# ==========================================
 
-st.subheader("Start Your Research")
+st.subheader("Choose Research Mode")
 
-topic = st.text_input(
-    "Enter your research topic",
-    placeholder="Example: Latest developments in Generative AI"
+mode = st.radio(
+    "Application Mode",
+    ["Demo Mode", "Live Research Mode"],
+    horizontal=True
 )
 
 
-# -----------------------------------
-# 4. START RESEARCH
-# -----------------------------------
+# ==========================================
+# DEMO MODE
+# ==========================================
 
-if st.button("🚀 Start Research", type="primary"):
+if mode == "Demo Mode":
 
-    if not topic.strip():
+    st.info(
+        "Demo Mode: This displays a previously generated research "
+        "report. No external API calls are made."
+    )
 
-        st.warning("Please enter a research topic.")
+    sample_report = load_sample_report()
+
+    if sample_report:
+
+        st.success("Sample research report loaded successfully!")
+
+        st.header("📄 Research Report")
+
+        st.markdown(sample_report)
+
+        st.download_button(
+            label="⬇️ Download Sample Research Report",
+            data=sample_report,
+            file_name="AI_Research_Demo_Report.md",
+            mime="text/markdown"
+        )
 
     else:
 
-        try:
+        st.error(
+            "Sample report not found. Please check the reports folder."
+        )
 
-            with st.spinner(
-                "AI agents are working on your research..."
-            ):
 
-                research_workflow = ResearchWorkflow()
+# ==========================================
+# LIVE RESEARCH MODE
+# ==========================================
 
-                result = research_workflow.run(topic)
+else:
 
-            st.success("Research completed successfully!")
+    st.info(
+        "Live Mode: Runs the actual multi-agent research workflow "
+        "using Tavily and Gemini APIs."
+    )
 
-            # -----------------------------------
-            # 5. DISPLAY RESEARCH RESULTS
-            # -----------------------------------
+    topic = st.text_input(
+        "Enter your research topic",
+        placeholder="Example: Latest developments in Generative AI"
+    )
 
-            st.divider()
+    if st.button("🚀 Start Live Research", type="primary"):
 
-            st.header("📚 Research Results")
+        if not topic.strip():
 
-            with st.expander("View Collected Sources"):
+            st.warning("Please enter a research topic.")
 
-                for index, source in enumerate(
-                    result["research_data"], start=1
+        else:
+
+            try:
+
+                with st.spinner(
+                    "Research, analysis, fact-checking and report "
+                    "generation are in progress..."
                 ):
 
-                    st.subheader(f"Source {index}")
+                    research_workflow = ResearchWorkflow()
 
-                    st.write("**Title:**", source["title"])
+                    result = research_workflow.run(topic.strip())
 
-                    st.write("**URL:**", source["url"])
+                st.success("Research completed successfully!")
 
-                    st.write("**Content:**", source["content"])
+                st.divider()
 
-                    st.divider()
+                # Research results
+                st.header("📚 Research Results")
 
-            # -----------------------------------
-            # 6. DISPLAY ANALYSIS
-            # -----------------------------------
+                research_data = result.get("research_data", [])
 
-            st.header("🧠 AI Analysis")
+                st.write(
+                    f"Number of selected sources: {len(research_data)}"
+                )
 
-            st.markdown(result["analysis"])
+                with st.expander("View Collected Sources"):
 
-            # -----------------------------------
-            # 7. FACT CHECKING
-            # -----------------------------------
+                    for index, source in enumerate(
+                        research_data, start=1
+                    ):
 
-            st.header("🔍 Fact-Checking Results")
+                        st.subheader(f"Source {index}")
 
-            st.markdown(result["fact_check"])
+                        st.write(
+                            "**Title:**",
+                            source.get("title", "Untitled")
+                        )
 
-            # -----------------------------------
-            # 8. DOWNLOAD REPORT
-            # -----------------------------------
+                        st.write(
+                            "**URL:**",
+                            source.get("url", "Not available")
+                        )
 
-            st.header("📄 Research Report")
+                        st.write(
+                            "**Content:**",
+                            source.get("content", "No content available")
+                        )
 
-            st.download_button(
-                label="⬇️ Download Research Report",
-                data=result["report"],
-                file_name="AI_Research_Report.md",
-                mime="text/markdown"
-            )
+                        st.divider()
 
-            st.success("Your report is ready to download!")
+                # Analysis
+                st.header("🧠 AI Analysis")
 
-        except Exception as e:
+                st.markdown(
+                    result.get("analysis", "No analysis available.")
+                )
 
-            st.error(f"An error occurred: {str(e)}")
+                # Fact checking
+                st.header("🔍 Fact-Checking Results")
+
+                st.markdown(
+                    result.get("fact_check", "No fact-check results available.")
+                )
+
+                # Report
+                st.header("📄 Research Report")
+
+                report = result.get("report", "")
+
+                if report:
+
+                    st.download_button(
+                        label="⬇️ Download Research Report",
+                        data=report,
+                        file_name="AI_Research_Report.md",
+                        mime="text/markdown"
+                    )
+
+                else:
+
+                    st.warning("The workflow did not generate a report.")
+
+            except Exception as error:
+
+                st.error(
+                    "Live research could not be completed."
+                )
+
+                st.warning(
+                    "This may be caused by temporary API availability, "
+                    "rate limits or configuration issues."
+                )
+
+                with st.expander("Technical error details"):
+
+                    st.code(str(error))
+
+
+# ==========================================
+# FOOTER
+# ==========================================
+
+st.divider()
+
+st.caption(
+    "Multi-Agent AI Research Assistant | "
+    "Built using Python, Streamlit, LangGraph, Tavily and Gemini."
+)
